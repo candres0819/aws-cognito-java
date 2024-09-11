@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-
+import org.apache.commons.lang3.StringUtils;
 import javax.naming.AuthenticationException;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +14,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import com.poc.aws.cognito.domain.ResponseDTO;
+import com.poc.aws.cognito.domain.TokenDTO;
+import com.poc.aws.cognito.util.AuthenticationHelper;
 
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -34,6 +36,8 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.AdminInitia
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InitiateAuthRequest;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.InitiateAuthResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthFlowType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.AuthenticationResultType;
+import software.amazon.awssdk.services.cognitoidentityprovider.model.CognitoIdentityProviderResponseMetadata;
 
 @Slf4j
 @Service
@@ -44,11 +48,11 @@ public class CognitoService {
     private final CognitoIdentityClient cognitoIdentityClient;
     private final CognitoIdentityProviderClient cognitoIdentityProviderClient;
 
-    //@Value("${aws.cognito.user-pool}")
-    //private String userPool;
+    @Value("${aws.cognito.user-pool}")
+    private String userPool;
 
-    //@Value("${aws.cognito.client-id}")
-    //private String clientId;
+    @Value("${aws.cognito.client-id}")
+    private String clientId;
 
     @Value("${aws.cognito.identity-pool-id}")
     private String identityPoolId;
@@ -73,11 +77,42 @@ public class CognitoService {
     }
     */
 
-    public String authenticateAndGetJWT(String username, String password) {
+    public TokenDTO authenticateUserTMPAndGetJWT(String username, String password) {
+
+        /*
+         * Reglas de negocio que me validan el usuario
+         */
         Map<String, String> authParams = new HashMap<>();
         authParams.put("USERNAME", username);
         authParams.put("PASSWORD", password);
-        
+
+        TokenDTO tokenDTO = null;
+        try {
+            AuthenticationHelper authenticationHelper = new AuthenticationHelper(cognitoIdentityProviderClient, identityPoolId, clientId, userPool);
+            CognitoIdentityProviderResponseMetadata cognitoIdentityProviderResponseMetadata = authenticationHelper.createOrUpdateUserFromAdmin(username, StringUtils.leftPad(password, 6, "0"));
+            log.info("cognitoIdentityProviderResponseMetadata: {}", cognitoIdentityProviderResponseMetadata);
+            AuthenticationResultType authenticationResultType = authenticationHelper.performSRPAuthentication(username, StringUtils.leftPad(password, 6, "0"));
+            log.info("authenticationResultType: {}", authenticationResultType);
+
+            tokenDTO = TokenDTO
+                    .builder()
+                    .accessToken(authenticationResultType.accessToken())
+                    .idToken(authenticationResultType.idToken())
+                    .refreshToken(authenticationResultType.refreshToken())
+                    .expiresIn(authenticationResultType.expiresIn())
+                    .build();
+        } catch (Exception e) {
+            log.error("Error Auth", e.getMessage());
+        }
+        return tokenDTO;
+    }
+
+    public String authenticateAndGetJWT(String username, String password) {
+
+        Map<String, String> authParams = new HashMap<>();
+        authParams.put("USERNAME", username);
+        authParams.put("PASSWORD", password);
+
         /*
          * AdminInitiateAuthRequest authRequest = new AdminInitiateAuthRequest()
          *  .withAuthFlow(AuthFlowType.ADMIN_NO_SRP_AUTH)
@@ -102,19 +137,22 @@ public class CognitoService {
 //                .builder()
 //                .identityId(idResponse.identityId())
 //                .build();
-
+//
 //        GetCredentialsForIdentityResponse getCredentialsForIdentityResponse = cognitoIdentityClient
 //                .getCredentialsForIdentity(credentialsRequest);
-
-//        Map<String, String> logins = new HashMap<>();
-//        logins.put("login.myapp.com", username);
 //
-//        GetOpenIdTokenRequest idRequest = GetOpenIdTokenRequest.builder()
+//        log.info("getOpenIdTokenResponse: {}", getCredentialsForIdentityResponse);
+//        log.info("===========");
+
+//        GetOpenIdTokenRequest getOpenIdTokenRequest = GetOpenIdTokenRequest
+//                .builder()
 //                .identityId(identityPoolId)
-////                .logins(authParams)
+//                .logins(authParams)
 //                .build();
+//
 //        GetOpenIdTokenResponse getOpenIdTokenResponse = cognitoIdentityClient
-//                .getOpenIdToken(idRequest);
+//                .getOpenIdToken(getOpenIdTokenRequest);
+//
 //        log.info("getOpenIdTokenResponse: {}", getOpenIdTokenResponse);
 //        log.info("===========");
 //
@@ -129,23 +167,42 @@ public class CognitoService {
 //        log.info("===========");
 
         //return response.token();
-        
 
-        String clientId = "7d2c0aq3usq16bhclntspssmgb";
-        String userPoolId = "us-east-1_434h91ehm";
-        InitiateAuthRequest req = InitiateAuthRequest.builder()
-                .authFlow(AuthFlowType.ADMIN_NO_SRP_AUTH)
-//                .authFlow(AuthFlowType.USER_PASSWORD_AUTH)
-                .clientId(clientId)
-//                .userPoolId(userPoolId)
-                .authParameters(authParams)
-                .build();
-
-        InitiateAuthResponse adminInitiateAuthResponse = cognitoIdentityProviderClient
-                .initiateAuth(req);
-
-        log.info("adminInitiateAuthResponse: {}", adminInitiateAuthResponse.authenticationResult().idToken());
+        AuthenticationHelper authenticationHelper = new AuthenticationHelper(cognitoIdentityProviderClient, identityPoolId, clientId, userPool);
+        AuthenticationResultType authenticationResultType = authenticationHelper.performCustomAuthentication(username, StringUtils.leftPad(password, 6, "0"));
+//        AuthenticationResultType authenticationAdminResultType = authenticationHelper.performSRPAdminAuthentication(username, StringUtils.leftPad(password, 6, "0"));
+        log.info("authenticationResultType: {}", authenticationResultType);
+//        log.info("authenticationResultType: {}", authenticationAdminResultType);
         log.info("===========");
+
+//        InitiateAuthRequest initiateAuthRequest = InitiateAuthRequest.builder()
+////                .authFlow(AuthFlowType.USER_SRP_AUTH)
+////                .authFlow(AuthFlowType.ADMIN_NO_SRP_AUTH)
+//                .authFlow(AuthFlowType.USER_PASSWORD_AUTH)
+//                .clientId(clientId)
+////                .userPoolId(userPoolId)
+//                .authParameters(authParams)
+//                .build();
+//
+//        InitiateAuthResponse initiateAuthResponse = cognitoIdentityProviderClient
+//                .initiateAuth(initiateAuthRequest);
+
+
+//        AdminInitiateAuthRequest adminInitiateAuthRequest = AdminInitiateAuthRequest.builder()
+//                .authFlow(AuthFlowType.ADMIN_USER_PASSWORD_AUTH)
+//                .authFlow(AuthFlowType.ADMIN_NO_SRP_AUTH)
+//                .authFlow(AuthFlowType.ADMIN_USER_PASSWORD_AUTH)
+//                .authFlow(AuthFlowType.USER_PASSWORD_AUTH)
+//                .clientId(clientId)
+//                .userPoolId(userPool)
+//                .authParameters(authParams)
+//                .build();
+
+//        AdminInitiateAuthResponse adminInitiateAuthResponse = cognitoIdentityProviderClient
+//                .adminInitiateAuth(adminInitiateAuthRequest);
+
+//        log.info("adminInitiateAuthResponse: {}", adminInitiateAuthResponse.authenticationResult().idToken());
+//        log.info("===========");
 //        log.info("getCredentialsForIdentityResponse: {}", getCredentialsForIdentityResponse);
 //        log.info("getCredentialsForIdentityResponse: {}", getCredentialsForIdentityResponse.credentials());
 //        return getCredentialsForIdentityResponse.credentials().sessionToken();

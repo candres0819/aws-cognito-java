@@ -40,11 +40,19 @@ class CognitoControllerMutationTest {
         String password = "testPassword";
         String expectedJwt = "testJWT";
 
+        // TokenDTO tokenDTO = TokenDTO
+        // .builder()
+        // .accessToken(expectedJwt)
+        // .idToken("")
+        // .refreshToken("")
+        // .expiresIn(""
+        // .build();
+
         when(cognitoService.authenticateAndGetJWT(anyString(), anyString())).thenReturn(expectedJwt);
 
         // Act
         AuthenticationRequest authenticationRequest = new AuthenticationRequest(username, password);
-        ResponseEntity<String> response = cognitoController.authenticateUser(authenticationRequest);
+        ResponseEntity<String> response = cognitoController.authenticateUserCustom(authenticationRequest);
 
         // Assert
         assertNotNull(response);
